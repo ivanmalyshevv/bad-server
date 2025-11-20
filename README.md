@@ -1,5 +1,7 @@
 # Проектная работа "WebLarek. Плохой сервер.", спринт 17
 
+
+
 ## Подготовка к работе
 1. Склонировать репозиторий
 2. Запустить docker
@@ -12,3 +14,5 @@ docker compose up -d
 5. На странице http://localhost/login/ можно авторизоваться.
 6. Админка находится по адресу http://localhost/admin/
 
+### GitHub-репозиторий
+  https://github.com/ivanmalyshevv/bad-server
