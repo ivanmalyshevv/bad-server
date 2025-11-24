@@ -15,23 +15,26 @@ import routes from './routes'
 
 const { PORT = 3000 } = process.env
 const app = express()
-app.set('trust proxy', 1)
+
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal'])
 
 app.use(cookieParser())
-
 app.use(helmet())
+
+// CORS настройки - упрощенная версия
+app.use(
+    cors({
+        origin: ORIGIN_ALLOW
+            ? ORIGIN_ALLOW.split(',')
+            : ['http://localhost:5173'],
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    })
+)
 
 // Применить лимитинг запросов ко всем API маршрутам
 app.use(apiLimiter)
-
-const corsOptions = {
-    origin: ORIGIN_ALLOW ? ORIGIN_ALLOW.split(',') : '*',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    maxAge: 3600,
-}
-app.use(cors(corsOptions))
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
@@ -41,7 +44,6 @@ app.use(json())
 // Валидация на NoSQL-инъекции
 app.use(validateNoSQLInjection)
 
-app.options('*', cors(corsOptions))
 app.use(routes)
 app.use(errors())
 app.use(errorHandler)
@@ -49,9 +51,11 @@ app.use(errorHandler)
 const bootstrap = async () => {
     try {
         await mongoose.connect(DB_ADDRESS)
-        await app.listen(PORT, () => console.log('ok'))
+        await app.listen(PORT, () =>
+            console.log('Backend server started on port', PORT)
+        )
     } catch (error) {
-        console.error(error)
+        console.error('Failed to start server:', error)
     }
 }
 

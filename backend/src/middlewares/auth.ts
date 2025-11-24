@@ -12,11 +12,14 @@ import UserModel, { Role } from '../models/user'
 const auth = async (req: Request, res: Response, next: NextFunction) => {
     let payload: JwtPayload | null = null
     const authHeader = req.header('Authorization')
-    if (!authHeader?.startsWith('Bearer ')) {
-        throw new UnauthorizedError('Невалидный токен')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return next(new UnauthorizedError('Необходима авторизация'))
     }
     try {
         const accessTokenParts = authHeader.split(' ')
+        if (accessTokenParts.length !== 2 || !accessTokenParts[1]) {
+            return next(new UnauthorizedError('Невалидный токен'))
+        }
         const aTkn = accessTokenParts[1]
         payload = jwt.verify(aTkn, ACCESS_TOKEN.secret) as JwtPayload
 
@@ -34,6 +37,7 @@ const auth = async (req: Request, res: Response, next: NextFunction) => {
 
         return next()
     } catch (error) {
+        // Всегда передаём ошибку через next, не выбрасываем её
         if (error instanceof Error && error.name === 'TokenExpiredError') {
             return next(new UnauthorizedError('Истек срок действия токена'))
         }

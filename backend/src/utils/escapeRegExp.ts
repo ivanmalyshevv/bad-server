@@ -1,3 +1,4 @@
-export default function escapeRegExp(string: string) {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+const escapeRegExp = (string: string): string =>
+    string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+export default escapeRegExp
