@@ -8,12 +8,14 @@ import mongoose from 'mongoose'
 import path from 'path'
 import { DB_ADDRESS, ORIGIN_ALLOW } from './config'
 import errorHandler from './middlewares/error-handler'
+import { validateNoSQLInjection } from './middlewares/nosql-injection'
 import { apiLimiter } from './middlewares/rate-limit'
 import serveStatic from './middlewares/serverStatic'
 import routes from './routes'
 
 const { PORT = 3000 } = process.env
 const app = express()
+app.set('trust proxy', 1)
 
 app.use(cookieParser())
 
@@ -22,26 +24,22 @@ app.use(helmet())
 // Применить лимитинг запросов ко всем API маршрутам
 app.use(apiLimiter)
 
-const corsOptions = ORIGIN_ALLOW
-    ? {
-          origin: ORIGIN_ALLOW.split(','),
-          credentials: true,
-          methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-          allowedHeaders: ['Content-Type', 'Authorization'],
-          maxAge: 3600,
-      }
-    : {
-          credentials: true,
-          methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-          allowedHeaders: ['Content-Type', 'Authorization'],
-          maxAge: 3600,
-      }
+const corsOptions = {
+    origin: ORIGIN_ALLOW ? ORIGIN_ALLOW.split(',') : '*',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 3600,
+}
 app.use(cors(corsOptions))
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
 app.use(urlencoded({ extended: true }))
 app.use(json())
+
+// Валидация на NoSQL-инъекции
+app.use(validateNoSQLInjection)
 
 app.options('*', cors(corsOptions))
 app.use(routes)
