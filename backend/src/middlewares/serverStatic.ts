@@ -3,20 +3,22 @@ import fs from 'fs'
 import path from 'path'
 
 export default function serveStatic(baseDir: string) {
+    const resolvedBase = path.resolve(baseDir)
     return (req: Request, res: Response, next: NextFunction) => {
-        // Определяем полный путь к запрашиваемому файлу
-        const filePath = path.join(baseDir, req.path)
+        const requested = path.resolve(resolvedBase, `.${req.path}`)
 
-        // Проверяем, существует ли файл
-        fs.access(filePath, fs.constants.F_OK, (err) => {
+        // Если запрошенный файл находится вне базовой директории — игнорируем
+        if (!requested.startsWith(resolvedBase)) {
+            return next()
+        }
+
+        fs.access(requested, fs.constants.F_OK, (err) => {
             if (err) {
-                // Файл не существует отдаем дальше мидлварам
                 return next()
             }
-            // Файл существует, отправляем его клиенту
-            return res.sendFile(filePath, (err) => {
-                if (err) {
-                    next(err)
+            return res.sendFile(requested, (sendErr) => {
+                if (sendErr) {
+                    next(sendErr)
                 }
             })
         })

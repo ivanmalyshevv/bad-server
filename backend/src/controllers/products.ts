@@ -51,13 +51,16 @@ const createProduct = async (
             )
         }
 
-        const product = await Product.create({
+        // Создаем только разрешенные поля (whitelist)
+        const newProduct = {
             description,
             image,
             category,
-            price,
+            price: price !== undefined ? Number(price) : undefined,
             title,
-        })
+        }
+
+        const product = await Product.create(newProduct)
         return res.status(constants.HTTP_STATUS_CREATED).send(product)
     } catch (error) {
         if (error instanceof MongooseError.ValidationError) {
@@ -92,15 +95,18 @@ const updateProduct = async (
             )
         }
 
+        // Обновляем только разрешенные поля
+        const allowed = ['description', 'category', 'price', 'title', 'image']
+        const setObj: Record<string, any> = {}
+        allowed.forEach((k) => {
+            if (req.body[k] !== undefined) {
+                setObj[k] = k === 'price' ? Number(req.body[k]) : req.body[k]
+            }
+        })
+
         const product = await Product.findByIdAndUpdate(
             productId,
-            {
-                $set: {
-                    ...req.body,
-                    price: req.body.price ? req.body.price : null,
-                    image: req.body.image ? req.body.image : undefined,
-                },
-            },
+            { $set: setObj },
             { runValidators: true, new: true }
         ).orFail(() => new NotFoundError('Нет товара по заданному id'))
         return res.send(product)

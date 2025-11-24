@@ -2,13 +2,13 @@ import { NextFunction, Request, Response } from 'express'
 import { FilterQuery, Error as MongooseError, Types } from 'mongoose'
 import BadRequestError from '../errors/bad-request-error'
 import NotFoundError from '../errors/not-found-error'
-import Order, { IOrder } from '../models/order'
+import Order, { IOrder, StatusType } from '../models/order'
 import Product, { IProduct } from '../models/product'
 import User from '../models/user'
+import escapeRegExp from '../utils/escapeRegExp'
 
 // eslint-disable-next-line max-len
 // GET /orders?page=2&limit=5&sort=totalAmount&order=desc&orderDateFrom=2024-07-01&orderDateTo=2024-08-01&status=delivering&totalAmountFrom=100&totalAmountTo=1000&search=%2B1
-
 export const getOrders = async (
     req: Request,
     res: Response,
@@ -28,15 +28,18 @@ export const getOrders = async (
             search,
         } = req.query
 
+        // Нормализация лимита: макс 10
+        const normalizedLimit = Math.min(Math.max(1, Number(limit)), 10)
+        const normalizedPage = Math.max(1, Number(page))
+
         const filters: FilterQuery<Partial<IOrder>> = {}
 
-        if (status) {
-            if (typeof status === 'object') {
-                Object.assign(filters, status)
-            }
-            if (typeof status === 'string') {
-                filters.status = status
-            }
+        // Безопасная фильтрация статуса
+        if (
+            status &&
+            Object.values(StatusType).includes(status as StatusType)
+        ) {
+            filters.status = status as StatusType
         }
 
         if (totalAmountFrom) {
@@ -61,87 +64,72 @@ export const getOrders = async (
         }
 
         if (orderDateTo) {
+            const endOfDay = new Date(orderDateFrom as string)
+            endOfDay.setHours(23, 59, 59, 999)
             filters.createdAt = {
                 ...filters.createdAt,
-                $lte: new Date(orderDateTo as string),
+                $lte: endOfDay,
             }
         }
 
-        const aggregatePipeline: any[] = [
-            { $match: filters },
-            {
-                $lookup: {
-                    from: 'products',
-                    localField: 'products',
-                    foreignField: '_id',
-                    as: 'products',
-                },
-            },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'customer',
-                    foreignField: '_id',
-                    as: 'customer',
-                },
-            },
-            { $unwind: '$customer' },
-            { $unwind: '$products' },
-        ]
-
+        // Безопасный поиск - убираем агрегацию
         if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
-            const searchNumber = Number(search)
+            const raw = String(search).slice(0, 200)
+            const searchRegex = new RegExp(escapeRegExp(raw), 'i')
+            const searchNumber = Number(raw)
 
-            const searchConditions: any[] = [{ 'products.title': searchRegex }]
+            // Ищем продукты по названию
+            const products = await Product.find({ title: searchRegex }, '_id')
+            const productIds = products.map((p) => p._id)
+
+            // Создаем безопасные условия поиска
+            const searchConditions = []
 
             if (!Number.isNaN(searchNumber)) {
                 searchConditions.push({ orderNumber: searchNumber })
             }
 
-            aggregatePipeline.push({
-                $match: {
-                    $or: searchConditions,
-                },
-            })
+            if (productIds.length > 0) {
+                searchConditions.push({ products: { $in: productIds } })
+            }
 
-            filters.$or = searchConditions
+            if (searchConditions.length > 0) {
+                filters.$or = searchConditions
+            }
         }
 
         const sort: { [key: string]: any } = {}
 
-        if (sortField && sortOrder) {
+        // Безопасная сортировка - только по разрешенным полям
+        const allowedSortFields = [
+            'createdAt',
+            'totalAmount',
+            'orderNumber',
+            'status',
+        ]
+        if (allowedSortFields.includes(sortField as string)) {
             sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
+        } else {
+            sort.createdAt = -1 // fallback
         }
 
-        aggregatePipeline.push(
-            { $sort: sort },
-            { $skip: (Number(page) - 1) * Number(limit) },
-            { $limit: Number(limit) },
-            {
-                $group: {
-                    _id: '$_id',
-                    orderNumber: { $first: '$orderNumber' },
-                    status: { $first: '$status' },
-                    totalAmount: { $first: '$totalAmount' },
-                    products: { $push: '$products' },
-                    customer: { $first: '$customer' },
-                    createdAt: { $first: '$createdAt' },
-                },
-            }
-        )
+        // Используем безопасный подход с populate
+        const orders = await Order.find(filters)
+            .populate(['customer', 'products'])
+            .sort(sort)
+            .skip((normalizedPage - 1) * normalizedLimit)
+            .limit(normalizedLimit)
 
-        const orders = await Order.aggregate(aggregatePipeline)
         const totalOrders = await Order.countDocuments(filters)
-        const totalPages = Math.ceil(totalOrders / Number(limit))
+        const totalPages = Math.ceil(totalOrders / normalizedLimit)
 
         res.status(200).json({
             orders,
             pagination: {
                 totalOrders,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: normalizedPage,
+                pageSize: normalizedLimit,
             },
         })
     } catch (error) {
@@ -157,9 +145,12 @@ export const getOrdersCurrentUser = async (
     try {
         const userId = res.locals.user._id
         const { search, page = 1, limit = 5 } = req.query
+        // Нормализация лимита
+        const normalizedLimit = Math.min(Math.max(1, Number(limit)), 10)
+        const normalizedPage = Math.max(1, Number(page))
         const options = {
-            skip: (Number(page) - 1) * Number(limit),
-            limit: Number(limit),
+            skip: (normalizedPage - 1) * normalizedLimit,
+            limit: normalizedLimit,
         }
 
         const user = await User.findById(userId)
@@ -184,9 +175,10 @@ export const getOrdersCurrentUser = async (
         let orders = user.orders as unknown as IOrder[]
 
         if (search) {
-            // если не экранировать то получаем Invalid regular expression: /+1/i: Nothing to repeat
-            const searchRegex = new RegExp(search as string, 'i')
-            const searchNumber = Number(search)
+            // Экранируем пользовательский ввод перед созданием RegExp
+            const raw = String(search).slice(0, 200)
+            const searchRegex = new RegExp(escapeRegExp(raw), 'i')
+            const searchNumber = Number(raw)
             const products = await Product.find({ title: searchRegex })
             const productIds = products.map((product) => product._id)
 
@@ -205,17 +197,17 @@ export const getOrdersCurrentUser = async (
         }
 
         const totalOrders = orders.length
-        const totalPages = Math.ceil(totalOrders / Number(limit))
+        const totalPages = Math.ceil(totalOrders / normalizedLimit)
 
-        orders = orders.slice(options.skip, options.skip + options.limit)
+        orders = orders.slice(options.skip, options.skip + normalizedLimit)
 
         return res.send({
             orders,
             pagination: {
                 totalOrders,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: normalizedPage,
+                pageSize: normalizedLimit,
             },
         })
     } catch (error) {
@@ -291,10 +283,22 @@ export const createOrder = async (
         const basket: IProduct[] = []
         const products = await Product.find<IProduct>({})
         const userId = res.locals.user._id
-        const { address, payment, phone, total, email, items, comment } =
-            req.body
+        const { address, payment, phone, total, email, items } = req.body
 
-        items.forEach((id: Types.ObjectId) => {
+        // Санитизация комментария: удаляем HTML теги
+        const sanitizedComment = (req.body.comment || '')
+            .replace(/<[^>]*>/g, '')
+            .slice(0, 500)
+
+        // Проверяем items: массив и допустимый размер
+        if (!Array.isArray(items) || items.length === 0 || items.length > 100) {
+            return next(new BadRequestError('Неверный список товаров'))
+        }
+
+        items.forEach((id: Types.ObjectId | string) => {
+            if (!Types.ObjectId.isValid(String(id))) {
+                throw new BadRequestError(`Товар с id ${id} не найден`)
+            }
             const product = products.find((p) => p._id.equals(id))
             if (!product) {
                 throw new BadRequestError(`Товар с id ${id} не найден`)
@@ -315,7 +319,7 @@ export const createOrder = async (
             payment,
             phone,
             email,
-            comment,
+            comment: sanitizedComment,
             customer: userId,
             deliveryAddress: address,
         })
@@ -339,6 +343,13 @@ export const updateOrder = async (
 ) => {
     try {
         const { status } = req.body
+        // Валидация статуса заказа
+        if (
+            status !== undefined &&
+            !Object.values(StatusType).includes(status)
+        ) {
+            return next(new BadRequestError('Недопустимый статус заказа'))
+        }
         const updatedOrder = await Order.findOneAndUpdate(
             { orderNumber: req.params.orderNumber },
             { status },

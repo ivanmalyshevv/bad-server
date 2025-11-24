@@ -1,6 +1,10 @@
 # Проектная работа "WebLarek. Плохой сервер.", спринт 17
 
-
+## Информация 
+- Репозиторий: https://github.com/ivanmalyshevv/bad-server
+- Автор: Иван Малюшев 
+- Когорта: 33
+- Курс: Фулстек расширенный
 
 ## Подготовка к работе
 1. Склонировать репозиторий
@@ -14,5 +18,3 @@ docker compose up -d
 5. На странице http://localhost/login/ можно авторизоваться.
 6. Админка находится по адресу http://localhost/admin/
 
-### GitHub-репозиторий
-  https://github.com/ivanmalyshevv/bad-server
