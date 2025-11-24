@@ -1,4 +1,5 @@
 import { Request, Express } from 'express'
+import fs from 'fs'
 import multer, { FileFilterCallback } from 'multer'
 import crypto from 'crypto'
 import { join, extname } from 'path'
@@ -16,6 +17,13 @@ const storage = multer.diskStorage({
             const tempPath = process.env.UPLOAD_PATH_TEMP || 'temp'
             // В контейнере используем абсолютный путь от /app
             const destinationPath = join(process.cwd(), `public/${tempPath}`)
+            // Убедимся, что директория существует
+            try {
+                fs.mkdirSync(destinationPath, { recursive: true })
+            } catch (err) {
+                // Если не удалось создать — отдадим ошибку дальше
+                return cb(err as Error, '')
+            }
             cb(null, destinationPath)
         } catch (error) {
             cb(error as Error, '')
@@ -28,6 +36,7 @@ const storage = multer.diskStorage({
         cb: FileNameCallback
     ) => {
         try {
+            console.log('file.filename callback, original:', file.originalname, 'mimetype:', file.mimetype)
             // Полностью игнорируем оригинальное имя
             const ext = extname(file.originalname).toLowerCase() || '.bin'
 
@@ -35,6 +44,8 @@ const storage = multer.diskStorage({
             const timestamp = Date.now()
             const randomString = crypto.randomBytes(16).toString('hex')
             const safeName = `${timestamp}-${randomString}${ext}`
+
+            console.log('file will be saved as:', safeName)
 
             cb(null, safeName)
         } catch (error) {
