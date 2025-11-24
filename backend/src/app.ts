@@ -23,8 +23,19 @@ app.use(helmet())
 app.use(apiLimiter)
 
 const corsOptions = ORIGIN_ALLOW
-    ? { origin: ORIGIN_ALLOW.split(','), credentials: true }
-    : undefined
+    ? {
+          origin: ORIGIN_ALLOW.split(','),
+          credentials: true,
+          methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+          allowedHeaders: ['Content-Type', 'Authorization'],
+          maxAge: 3600,
+      }
+    : {
+          credentials: true,
+          methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+          allowedHeaders: ['Content-Type', 'Authorization'],
+          maxAge: 3600,
+      }
 app.use(cors(corsOptions))
 
 app.use(serveStatic(path.join(__dirname, 'public')))
@@ -32,8 +43,7 @@ app.use(serveStatic(path.join(__dirname, 'public')))
 app.use(urlencoded({ extended: true }))
 app.use(json())
 
-// CSRF защита встроена: SameSite=strict cookies + JWT в Authorization header
-app.options('*', cors())
+app.options('*', cors(corsOptions))
 app.use(routes)
 app.use(errors())
 app.use(errorHandler)
