@@ -2,13 +2,13 @@ import { NextFunction, Request, Response } from 'express'
 import { FilterQuery, Error as MongooseError, Types } from 'mongoose'
 import BadRequestError from '../errors/bad-request-error'
 import NotFoundError from '../errors/not-found-error'
-import Order, { IOrder } from '../models/order'
+import Order, { IOrder, StatusType } from '../models/order'
 import Product, { IProduct } from '../models/product'
 import User from '../models/user'
+import escapeRegExp from '../utils/escapeRegExp'
 
 // eslint-disable-next-line max-len
 // GET /orders?page=2&limit=5&sort=totalAmount&order=desc&orderDateFrom=2024-07-01&orderDateTo=2024-08-01&status=delivering&totalAmountFrom=100&totalAmountTo=1000&search=%2B1
-
 export const getOrders = async (
     req: Request,
     res: Response,
@@ -90,8 +90,9 @@ export const getOrders = async (
         ]
 
         if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
-            const searchNumber = Number(search)
+            const raw = String(search).slice(0, 200)
+            const searchRegex = new RegExp(escapeRegExp(raw), 'i')
+            const searchNumber = Number(raw)
 
             const searchConditions: any[] = [{ 'products.title': searchRegex }]
 
@@ -184,9 +185,10 @@ export const getOrdersCurrentUser = async (
         let orders = user.orders as unknown as IOrder[]
 
         if (search) {
-            // если не экранировать то получаем Invalid regular expression: /+1/i: Nothing to repeat
-            const searchRegex = new RegExp(search as string, 'i')
-            const searchNumber = Number(search)
+            // Экранируем пользовательский ввод перед созданием RegExp
+            const raw = String(search).slice(0, 200)
+            const searchRegex = new RegExp(escapeRegExp(raw), 'i')
+            const searchNumber = Number(raw)
             const products = await Product.find({ title: searchRegex })
             const productIds = products.map((product) => product._id)
 
@@ -294,7 +296,15 @@ export const createOrder = async (
         const { address, payment, phone, total, email, items, comment } =
             req.body
 
-        items.forEach((id: Types.ObjectId) => {
+        // Проверяем items: массив и допустимый размер
+        if (!Array.isArray(items) || items.length === 0 || items.length > 100) {
+            return next(new BadRequestError('Неверный список товаров'))
+        }
+
+        items.forEach((id: Types.ObjectId | string) => {
+            if (!Types.ObjectId.isValid(String(id))) {
+                throw new BadRequestError(`Товар с id ${id} не найден`)
+            }
             const product = products.find((p) => p._id.equals(id))
             if (!product) {
                 throw new BadRequestError(`Товар с id ${id} не найден`)
@@ -339,6 +349,10 @@ export const updateOrder = async (
 ) => {
     try {
         const { status } = req.body
+        // Валидация статуса заказа
+        if (status !== undefined && !Object.values(StatusType).includes(status)) {
+            return next(new BadRequestError('Недопустимый статус заказа'))
+        }
         const updatedOrder = await Order.findOneAndUpdate(
             { orderNumber: req.params.orderNumber },
             { status },

@@ -3,6 +3,7 @@ import { FilterQuery } from 'mongoose'
 import NotFoundError from '../errors/not-found-error'
 import Order from '../models/order'
 import User, { IUser } from '../models/user'
+import escapeRegExp from '../utils/escapeRegExp'
 
 // TODO: Добавить guard admin
 // eslint-disable-next-line max-len
@@ -92,7 +93,8 @@ export const getCustomers = async (
         }
 
         if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
+            const raw = String(search).slice(0, 200)
+            const searchRegex = new RegExp(escapeRegExp(raw), 'i')
             const orders = await Order.find(
                 {
                     $or: [{ deliveryAddress: searchRegex }],
@@ -178,25 +180,33 @@ export const updateCustomer = async (
     res: Response,
     next: NextFunction
 ) => {
-    try {
-        const updatedUser = await User.findByIdAndUpdate(
-            req.params.id,
-            req.body,
-            {
-                new: true,
-            }
-        )
-            .orFail(
-                () =>
-                    new NotFoundError(
-                        'Пользователь по заданному id отсутствует в базе'
-                    )
+        try {
+            // Whitelist полей для обновления
+            const allowed = ['name', 'phone']
+            const updates: Record<string, any> = {}
+            allowed.forEach((k) => {
+                if (req.body[k] !== undefined) updates[k] = req.body[k]
+            })
+
+            const updatedUser = await User.findByIdAndUpdate(
+                req.params.id,
+                { $set: updates },
+                {
+                    new: true,
+                    runValidators: true,
+                }
             )
-            .populate(['orders', 'lastOrder'])
-        res.status(200).json(updatedUser)
-    } catch (error) {
-        next(error)
-    }
+                .orFail(
+                    () =>
+                        new NotFoundError(
+                            'Пользователь по заданному id отсутствует в базе'
+                        )
+                )
+                .populate(['orders', 'lastOrder'])
+            res.status(200).json(updatedUser)
+        } catch (error) {
+            next(error)
+        }
 }
 
 // TODO: Добавить guard admin

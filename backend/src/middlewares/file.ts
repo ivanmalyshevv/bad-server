@@ -1,6 +1,7 @@
 import { Request, Express } from 'express'
 import multer, { FileFilterCallback } from 'multer'
-import { join } from 'path'
+import crypto from 'crypto'
+import { join, extname } from 'path'
 
 type DestinationCallback = (error: Error | null, destination: string) => void
 type FileNameCallback = (error: Error | null, filename: string) => void
@@ -27,7 +28,15 @@ const storage = multer.diskStorage({
         file: Express.Multer.File,
         cb: FileNameCallback
     ) => {
-        cb(null, file.originalname)
+        try {
+            const ext = extname(file.originalname) || ''
+            const safeName = `${Date.now()}-${crypto
+                .randomBytes(8)
+                .toString('hex')}${ext}`
+            cb(null, safeName)
+        } catch (error) {
+            cb(error as Error, '')
+        }
     },
 })
 
@@ -51,4 +60,6 @@ const fileFilter = (
     return cb(null, true)
 }
 
-export default multer({ storage, fileFilter })
+const maxSize = Number(process.env.UPLOAD_MAX_SIZE) || 5 * 1024 * 1024
+
+export default multer({ storage, fileFilter, limits: { fileSize: maxSize } })
